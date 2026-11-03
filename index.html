@@ -73,6 +73,15 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .meter b{display:block;height:100%;width:0;background:var(--red);transition:width .08s}
 .state{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .state.live{color:var(--red)}
+.state.err{color:var(--red)}
+.spk{margin-top:14px;display:grid;gap:8px;border:1px solid var(--line);border-radius:6px;padding:12px;background:var(--panel-2)}
+.spk-head{display:grid;gap:2px}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;font-size:15px;border-radius:999px;background:var(--panel);min-height:44px}
+.chip i{width:10px;height:10px;border-radius:50%;flex:none}
+.chip kbd{font:11px var(--mono);color:var(--muted)}
+.chip.on{background:var(--red);border-color:var(--red);color:#fff}
+.chip.on kbd{color:#fff}
+.chip.on i{outline:2px solid #fff}
 .interim{font-style:italic;color:var(--muted);min-height:1.5em}
 #transcript{font:13.5px/1.6 var(--mono);min-height:220px}
 .notice{border-left:3px solid var(--warn);background:var(--panel-2);padding:10px 12px;border-radius:0 4px 4px 0;font-size:14px}
@@ -134,9 +143,14 @@ td.s select{padding:4px 6px;font-size:13px;width:auto;max-width:170px;border-lef
           <div class="state" id="recState">Pronto para gravar</div>
           <div class="clock" id="clock">00:00:00</div>
           <div class="meter"><b id="lvl"></b></div>
+          <div class="state" id="srState"></div>
         </div>
       </div>
       <p class="hint" style="margin-top:12px">Deixe o notebook no centro da mesa. A transcrição aparece abaixo enquanto as pessoas falam. Peça para cada um se apresentar no início (“Aqui é o Eder…”): isso ajuda muito a identificar as vozes.</p>
+      <div class="spk" id="spkBar">
+        <div class="spk-head"><b>Quem está falando agora?</b><span class="who">Toque no nome quando a pessoa começar a falar. No notebook, as teclas 1 a 9 também funcionam.</span></div>
+        <div class="row" id="spkChips"></div>
+      </div>
       <div class="interim" id="interim"></div>
       <div class="row" id="audioRow" hidden><a id="audioLink" download="audio-reuniao.webm"><button>Baixar áudio da reunião</button></a></div>
     </div>
@@ -185,6 +199,7 @@ const KEY = "ulrik-ata-draft-v1";
 const POSTOS = [];
 const COLORS = ["#e3262f","#3b8fd9","#3fb27f","#e0a63a","#a46be0","#e06bb0","#4cc3c3","#b0b33a","#d9773b","#7f8ad9"];
 const NI = "Não identificado";
+let currentSpk="";
 
 let S = {
   meta:{pauta:"",data:"",inicio:"",local:""},
@@ -211,11 +226,12 @@ function renderPeople(){
       <button class="x" aria-label="Remover">✕</button>`;
     const n=r.querySelector("#pn"+i), c=r.querySelector("#pc"+i);
     n.value=p.nome; c.value=p.cargo;
-    n.oninput=()=>{p.nome=n.value;save();}; c.oninput=()=>{p.cargo=c.value;save();};
+    n.oninput=()=>{p.nome=n.value;save();renderChips();}; c.oninput=()=>{p.cargo=c.value;save();};
     n.onchange=()=>{ if(S.ata) renderAta(); };
     r.querySelector("button").onclick=()=>{S.people.splice(i,1);save();renderPeople(); if(S.ata) renderAta();};
     box.appendChild(r);
   });
+  renderChips();
 }
 $("addP").onclick=()=>{S.people.push({nome:"",cargo:""});save();renderPeople();$("pn"+(S.people.length-1)).focus();};
 renderPeople();
@@ -241,34 +257,90 @@ if (!inArtifact) {
   $("importArea").hidden=false;
 }
 
+function renderChips(){
+  const box=$("spkChips"); if(!box) return; box.innerHTML="";
+  const ppl=S.people.map((p,i)=>({nome:p.nome.trim(),i})).filter(p=>p.nome);
+  if(currentSpk && !ppl.some(p=>p.nome===currentSpk)) currentSpk="";
+  ppl.forEach((p,k)=>{
+    const b=document.createElement("button"); b.type="button"; b.className="chip"+(currentSpk===p.nome?" on":"");
+    b.setAttribute("aria-pressed",currentSpk===p.nome);
+    b.innerHTML=`<i style="background:${COLORS[p.i%COLORS.length]}"></i><span></span>${k<9?`<kbd>${k+1}</kbd>`:""}`;
+    b.querySelector("span").textContent=p.nome;
+    b.onclick=()=>setSpk(currentSpk===p.nome?"":p.nome);
+    box.appendChild(b);
+  });
+  const n=document.createElement("button"); n.type="button"; n.className="chip"+(currentSpk?"":" on"); n.textContent="Não marcar (IA decide)";
+  n.onclick=()=>setSpk(""); box.appendChild(n);
+  if(!ppl.length) box.insertAdjacentHTML("afterbegin",'<span class="who">Cadastre os participantes na etapa 1 para aparecerem aqui.</span>');
+}
+function setSpk(nome){ currentSpk=nome; renderChips(); }
+document.addEventListener("keydown",e=>{
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  const t=e.target; if(t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)) return;
+  if(!/^[1-9]$/.test(e.key)) return;
+  const ppl=S.people.map(p=>p.nome.trim()).filter(Boolean); const nome=ppl[+e.key-1]; if(nome){ e.preventDefault(); setSpk(nome); }
+});
 function addLine(text){
   if(!text) return;
-  const line=`[${fmt(elapsed())}] ${text.charAt(0).toUpperCase()+text.slice(1)}`;
+  const line=`[${fmt(elapsed())}] ${currentSpk?currentSpk+": ":""}${text.charAt(0).toUpperCase()+text.slice(1)}`;
   T.value = (T.value && !T.value.endsWith("\n") ? T.value+"\n" : T.value) + line + "\n";
   T.scrollTop=T.scrollHeight; S.transcript=T.value; save();
 }
+const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent), isAndroid=/Android/i.test(navigator.userAgent);
+let lastResultAt=0, lastLoudAt=0, watchdog=null, freedMic=false, srRunning=false;
+function srStatus(t,kind){ const el=$("srState"); el.textContent=t||""; el.className="state"+(kind?" "+kind:""); }
 function startSR(){
-  rec=new SR(); rec.lang="pt-BR"; rec.continuous=true; rec.interimResults=true;
-  rec.onresult=e=>{ let interim=""; for(let i=e.resultIndex;i<e.results.length;i++){ const r=e.results[i]; if(r.isFinal) addLine(r[0].transcript.trim()); else interim+=r[0].transcript; } $("interim").textContent=interim; };
-  rec.onerror=e=>{ if(e.error==="not-allowed"||e.error==="service-not-allowed"){ msg("recMsg","O microfone foi bloqueado. Clique no ícone de cadeado na barra de endereço do Chrome, permita o microfone e tente de novo.","err"); stopRec(); } else if(e.error==="audio-capture" && stream){ releaseAudio(); msg("recMsg","Este aparelho não deixa gravar o áudio e transcrever ao mesmo tempo. A transcrição continua; o arquivo de áudio não será gerado.",""); } else if(e.error==="network"){ msg("recMsg","A transcrição precisa de internet. Verifique a conexão; a gravação do áudio continua.","err"); } };
-  rec.onend=()=>{ if(recording){ try{rec.start();}catch(_){} } };
-  rec.start();
+  if(!recording) return;
+  rec=new SR(); rec.lang="pt-BR"; rec.continuous=!isAndroid; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onstart=()=>{ srRunning=true; srStatus("Transcrição: ouvindo…","live"); };
+  rec.onspeechstart=()=>{ lastLoudAt=Date.now(); if(!stream) $("lvl").style.width="65%"; };
+  rec.onspeechend=()=>{ if(!stream) $("lvl").style.width="0"; };
+  rec.onresult=e=>{ let interim=""; lastResultAt=Date.now();
+    for(let i=e.resultIndex;i<e.results.length;i++){ const r=e.results[i]; if(r.isFinal) addLine(r[0].transcript.trim()); else interim+=r[0].transcript; }
+    $("interim").textContent=interim; };
+  rec.onerror=e=>{
+    const er=e.error;
+    if(er==="no-speech"||er==="aborted") return;
+    if(er==="not-allowed"||er==="service-not-allowed"){ msg("recMsg","O microfone foi bloqueado para a transcrição. Toque no cadeado ao lado do endereço, permita o microfone e tente de novo.","err"); stopRec(); return; }
+    if(er==="audio-capture"){ if(stream){ freeMic("O aparelho não deixou gravar o áudio e transcrever juntos. Desliguei o arquivo de áudio e a transcrição continua."); } else msg("recMsg","O microfone está sendo usado por outro programa (WhatsApp, Meet, gravador…). Feche-o e tente de novo.","err"); return; }
+    if(er==="network"){ msg("recMsg", navigator.brave ? "O navegador Brave não tem transcrição de voz. Use o Google Chrome ou o Edge." : "A transcrição precisa de internet e funciona no Google Chrome, Edge ou Safari. Verifique a conexão.","err"); srStatus("Transcrição: sem conexão","err"); return; }
+    if(er==="language-not-supported"){ msg("recMsg","Este navegador não transcreve em português. Use o Google Chrome.","err"); return; }
+    srStatus("Transcrição: erro ("+er+")","err");
+  };
+  rec.onend=()=>{ srRunning=false; if(recording) setTimeout(startSR,300); else srStatus(""); };
+  if(!srRunning) srStatus("Transcrição: conectando…","");
+  try{ rec.start(); }catch(_){ setTimeout(startSR,600); }
+}
+function freeMic(text){
+  if(freedMic) return; freedMic=true; releaseAudio();
+  msg("recMsg",text,"");
+  try{ rec&&rec.abort(); }catch(_){}
 }
 async function startRec(){
   if(!SR) return;
-  msg("recMsg","");
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
-    mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
-    mediaRec.onstop=()=>{ const b=new Blob(chunks,{type:mediaRec.mimeType||"audio/webm"}); $("audioLink").href=URL.createObjectURL(b); $("audioLink").download=`audio-reuniao-${S.meta.data||"sem-data"}.webm`; $("audioRow").hidden=false; };
-    mediaRec.start(1000);
-    actx=new AudioContext(); const an=actx.createAnalyser(); an.fftSize=512; actx.createMediaStreamSource(stream).connect(an);
-    const buf=new Uint8Array(an.fftSize);
-    const loop=()=>{ an.getByteTimeDomainData(buf); let m=0; for(const v of buf) m=Math.max(m,Math.abs(v-128)); $("lvl").style.width=Math.min(100,m/0.9)+"%"; raf=requestAnimationFrame(loop); }; loop();
-  } catch(e){ msg("recMsg","Não foi possível acessar o microfone. Permita o acesso no Chrome e tente de novo.","err"); return; }
-  recording=true; segStart=performance.now();
+  msg("recMsg",""); freedMic=false;
+  if(!isMobile){
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+      mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+      mediaRec.onstop=()=>{ if(!chunks.length) return; const b=new Blob(chunks,{type:mediaRec.mimeType||"audio/webm"}); $("audioLink").href=URL.createObjectURL(b); $("audioLink").download=`audio-reuniao-${S.meta.data||"sem-data"}.webm`; $("audioRow").hidden=false; };
+      mediaRec.start(1000);
+      actx=new AudioContext(); const an=actx.createAnalyser(); an.fftSize=512; actx.createMediaStreamSource(stream).connect(an);
+      const buf=new Uint8Array(an.fftSize);
+      const loop=()=>{ an.getByteTimeDomainData(buf); let m=0; for(const v of buf) m=Math.max(m,Math.abs(v-128)); if(m>18) lastLoudAt=Date.now(); $("lvl").style.width=Math.min(100,m/0.9)+"%"; raf=requestAnimationFrame(loop); }; loop();
+    } catch(e){ stream=null; msg("recMsg","Não consegui abrir o microfone para salvar o áudio. A transcrição vai tentar mesmo assim.",""); }
+  }
+  recording=true; segStart=performance.now(); lastResultAt=Date.now();
   if(!T.value.trim()) { T.value=`--- Reunião iniciada às ${new Date().toTimeString().slice(0,5)} ---\n`; S.meta.inicio=new Date().toTimeString().slice(0,5); $("m_inicio").value=S.meta.inicio; }
   startSR();
+  // vigia: se tem voz chegando mas nenhuma frase vira texto por 12 s, libera o microfone para a transcrição
+  clearInterval(watchdog);
+  watchdog=setInterval(()=>{
+    if(!recording) return;
+    const now=Date.now(), quiet=now-lastResultAt;
+    if(stream && quiet>12000 && now-lastLoudAt<3000) freeMic("A transcrição não estava recebendo sua voz porque o microfone estava ocupado com o arquivo de áudio. Desliguei o arquivo de áudio; a transcrição deve aparecer agora.");
+    else if(!stream && quiet>20000 && now-lastLoudAt<3000){ srStatus("Transcrição: reiniciando…",""); try{rec&&rec.abort();}catch(_){} lastResultAt=now; }
+  },3000);
   try { wake = await navigator.wakeLock?.request("screen"); } catch(_){}
   $("recBtn").classList.add("on"); $("recBtn").setAttribute("aria-label","Encerrar gravação");
   $("recState").textContent="● Gravando"; $("recState").classList.add("live");
@@ -284,7 +356,7 @@ function stopRec(){
   recording=false; try{rec&&rec.stop();}catch(_){}
   releaseAudio();
   try{wake&&wake.release();}catch(_){}
-  clearInterval(tick); $("interim").textContent="";
+  clearInterval(tick); clearInterval(watchdog); $("interim").textContent="";
   $("recBtn").classList.remove("on"); $("recBtn").setAttribute("aria-label","Continuar gravação");
   $("recState").textContent=acc?"Gravação encerrada · toque para continuar":"Pronto para gravar"; $("recState").classList.remove("live");
   S.meta.fim=new Date().toTimeString().slice(0,5); save();
@@ -370,7 +442,7 @@ ${ppl}
 POSTOS/CONDOMÍNIOS ATENDIDOS (para corrigir nomes mal reconhecidos): ${POSTOS.join(", ")}
 
 TAREFA
-1) Atribua cada trecho a um participante. Use as pistas: apresentações ("aqui é o..."), vocativos ("Eder, você..." indica que quem fala NÃO é o Eder e que o próximo trecho provavelmente é dele), cargo e área de cada um, quem pergunta e quem responde, quem conduz a pauta, continuidade de assunto. Se um trecho tiver claramente duas falas, divida em dois. Quando não houver pista confiável, use "${NI}". Nunca invente pessoas fora da lista.
+1) Linhas no formato "[tempo] Nome: texto" tiveram o falante MARCADO À MÃO durante a reunião: mantenha esse falante (só divida o trecho se ficar evidente que outra pessoa entrou na conversa). Para as linhas SEM nome marcado, atribua cada trecho a um participante. Use as pistas: apresentações ("aqui é o..."), vocativos ("Eder, você..." indica que quem fala NÃO é o Eder e que o próximo trecho provavelmente é dele), cargo e área de cada um, quem pergunta e quem responde, quem conduz a pauta, continuidade de assunto. Se um trecho tiver claramente duas falas, divida em dois. Quando não houver pista confiável, use "${NI}". Nunca invente pessoas fora da lista.
 2) Corrija erros evidentes de reconhecimento de voz e pontuação, sem mudar o sentido.
 3) Redija a ATA em português formal. Não invente decisões, responsáveis nem prazos: use "A definir" quando não forem ditos. Linhas de marcação como "--- ... ---" não são falas.
 
