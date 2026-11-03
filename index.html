@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gravador ATA">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Gravador de ATA Ulrik</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* Layout: uma coluna de trabalho em três etapas (Reunião → Gravação → ATA), barra superior fixa com o estado da gravação */
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#0d0d0e; --panel:#161617; --panel-2:#1e1e20; --line:#2c2c2f;
+  --fg:#f4f2f1; --muted:#a3a0a0; --red:#e3262f; --red-soft:rgba(227,38,47,.14);
+  --ok:#3fb27f; --warn:#e0a63a;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#f6f5f4; --panel:#ffffff; --panel-2:#f0eeed; --line:#dedad8;
+  --fg:#161617; --muted:#66615f; --red:#c8141d; --red-soft:rgba(200,20,29,.08);
+  --ok:#1f8a5b; --warn:#a8720d; color-scheme:light;}}
+:root[data-theme="light"]{
+  --bg:#f6f5f4; --panel:#ffffff; --panel-2:#f0eeed; --line:#dedad8;
+  --fg:#161617; --muted:#66615f; --red:#c8141d; --red-soft:rgba(200,20,29,.08);
+  --ok:#1f8a5b; --warn:#a8720d; color-scheme:light;}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-block:20px 60px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:18px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--red);padding-bottom:12px}
+.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand b{font:700 26px/1 var(--display);letter-spacing:.06em;text-transform:uppercase}
+.brand span{font:600 15px/1 var(--display);letter-spacing:.14em;text-transform:uppercase;color:var(--red)}
+.mode{font:500 12px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:4px 8px}
+section.step{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px;display:grid;gap:14px;min-width:0}
+.step h2{margin:0;display:flex;align-items:center;gap:10px;font:700 20px/1.1 var(--display);letter-spacing:.04em;text-transform:uppercase}
+.step h2 i{font-style:normal;font:600 12px var(--mono);color:var(--red);border:1px solid var(--red);border-radius:3px;padding:2px 6px}
+.hint{color:var(--muted);font-size:13.5px;margin:0;max-width:70ch}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+label.f{display:grid;gap:4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);min-width:0}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:8px 10px;width:100%;min-width:0;text-transform:none;letter-spacing:0}
+textarea{resize:vertical}
+input:focus,select:focus,textarea:focus,button:focus-visible,[contenteditable]:focus{outline:2px solid var(--red);outline-offset:1px}
+button{font:600 14px var(--body);border-radius:4px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--red);border-color:var(--red);color:#fff}
+button.primary:hover{filter:brightness(1.1)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.people{display:grid;gap:8px}
+.person{display:grid;grid-template-columns:14px minmax(0,1.3fr) minmax(0,1fr) auto;gap:8px;align-items:center}
+.dot{width:12px;height:12px;border-radius:50%}
+.x{padding:6px 10px;color:var(--muted)}
+/* gravação */
+.rec{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.recbtn{width:84px;height:84px;border-radius:50%;border:3px solid var(--red);background:transparent;display:grid;place-items:center;padding:0}
+.recbtn::after{content:"";width:34px;height:34px;border-radius:50%;background:var(--red);transition:border-radius .2s,width .2s,height .2s}
+.recbtn.on::after{width:28px;height:28px;border-radius:4px}
+.recbtn.on{animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--red-soft)}50%{box-shadow:0 0 0 12px var(--red-soft)}}
+@media (prefers-reduced-motion:reduce){.recbtn.on{animation:none}}
+.clock{font:500 34px/1 var(--mono);font-variant-numeric:tabular-nums}
+.meter{height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden;max-width:320px}
+.meter b{display:block;height:100%;width:0;background:var(--red);transition:width .08s}
+.state{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.state.live{color:var(--red)}
+.interim{font-style:italic;color:var(--muted);min-height:1.5em}
+#transcript{font:13.5px/1.6 var(--mono);min-height:220px}
+.notice{border-left:3px solid var(--warn);background:var(--panel-2);padding:10px 12px;border-radius:0 4px 4px 0;font-size:14px}
+.notice.err{border-color:var(--red)}
+.notice.ok{border-color:var(--ok)}
+/* ATA */
+.ata{display:grid;gap:18px}
+.ata h3{margin:0 0 6px;font:700 15px var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--red)}
+.ata .title{font:700 24px/1.15 var(--display);text-transform:uppercase;letter-spacing:.03em;text-wrap:balance}
+.ata [contenteditable]{border-radius:3px;padding:1px 3px;margin:-1px -3px}
+.ata [contenteditable]:hover{background:var(--panel-2)}
+.ata ul{margin:0;padding-left:20px;display:grid;gap:4px}
+.subj{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:4px}
+.subj b{font-weight:600}
+.who{font-size:12.5px;color:var(--muted)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 11.5px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--panel-2)}
+tr:last-child td{border-bottom:0}
+td.t{font:12.5px var(--mono);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+td.s select{padding:4px 6px;font-size:13px;width:auto;max-width:170px;border-left-width:4px}
+.thinking{font:500 13px var(--mono);color:var(--muted)}
+.empty{color:var(--muted);border:1px dashed var(--line);border-radius:6px;padding:22px;text-align:center}
+.foot{color:var(--muted);font-size:12px;text-align:center}
+@media (max-width:560px){.person{grid-template-columns:14px 1fr auto}.person .cargo{grid-column:2/3}.person .x{grid-row:1;grid-column:3}.brand b{font-size:22px}.rec{grid-template-columns:1fr;justify-items:start}}
+</style>
+
+</head><body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><b>Grupo Ulrik</b><span>Gravador de ATA</span></div>
+    <div class="row"><button class="primary" id="installBtn" hidden>Instalar app</button><div class="mode" id="mode">carregando…</div></div>
+    <div class="notice" id="iosHint" hidden style="flex-basis:100%">Para instalar no iPhone: toque em <b>Compartilhar</b> (quadrado com seta) e depois em <b>Adicionar à Tela de Início</b>.</div>
+  </header>
+
+  <section class="step" id="s1">
+    <h2><i>1</i>Dados da reunião</h2>
+    <div class="grid">
+      <label class="f">Assunto / pauta<input id="m_pauta" placeholder="Ex.: Alinhamento semanal da operação"></label>
+      <label class="f">Data<input id="m_data" type="date"></label>
+      <label class="f">Início<input id="m_inicio" type="time"></label>
+      <label class="f">Local<input id="m_local" list="postos" placeholder="Sede, condomínio ou posto"></label>
+    </div>
+    <datalist id="postos"></datalist>
+    <div>
+      <p class="hint" style="margin-bottom:8px">Cadastre quem vai participar. A IA usa nomes e cargos para descobrir quem falou cada trecho, então vale colocar o cargo e a área de cada um.</p>
+      <div class="people" id="people"></div>
+      <div class="row" style="margin-top:8px"><button id="addP">+ Participante</button></div>
+    </div>
+  </section>
+
+  <section class="step" id="s2">
+    <h2><i>2</i>Gravação e transcrição</h2>
+    <div id="recArea" hidden>
+      <div class="rec">
+        <button class="recbtn" id="recBtn" aria-label="Iniciar gravação"></button>
+        <div style="display:grid;gap:8px;min-width:0">
+          <div class="state" id="recState">Pronto para gravar</div>
+          <div class="clock" id="clock">00:00:00</div>
+          <div class="meter"><b id="lvl"></b></div>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:12px">Deixe o notebook no centro da mesa. A transcrição aparece abaixo enquanto as pessoas falam. Peça para cada um se apresentar no início (“Aqui é o Eder…”): isso ajuda muito a identificar as vozes.</p>
+      <div class="interim" id="interim"></div>
+      <div class="row" id="audioRow" hidden><a id="audioLink" download="audio-reuniao.webm"><button>Baixar áudio da reunião</button></a></div>
+    </div>
+    <div id="importArea" hidden>
+      <div class="notice">Esta página não tem acesso ao microfone. Grave a reunião com o <b>Gravador local</b> (arquivo aberto no Chrome do notebook) e depois traga a transcrição para cá: use “Importar arquivo” com o .txt exportado ou cole o texto na caixa abaixo.</div>
+      <div class="row" style="margin-top:10px">
+        <label for="fileIn"><button type="button" onclick="document.getElementById('fileIn').click()">Importar arquivo (.txt)</button></label>
+        <input type="file" id="fileIn" accept=".txt,.json,text/plain" hidden>
+        <button id="sampleBtn">Carregar exemplo</button>
+      </div>
+    </div>
+    <label class="f">Transcrição (pode corrigir à vontade)
+      <textarea id="transcript" placeholder="[00:00:05] Bom dia a todos, vamos começar a reunião..."></textarea>
+    </label>
+    <div class="row">
+      <button id="clearT">Limpar transcrição</button>
+      <span style="flex:1"></span>
+      <button id="exportBtn" hidden>Exportar para o Gerador de ATA</button>
+    </div>
+    <div id="recMsg"></div>
+  </section>
+
+  <section class="step" id="s3">
+    <h2><i>3</i>ATA da reunião</h2>
+    <div class="row">
+      <button class="primary" id="genBtn">Gerar ATA com IA</button>
+      <button id="stopBtn" hidden>Parar</button>
+      <span class="thinking" id="thinking"></span>
+    </div>
+    <div id="genMsg"></div>
+    <div id="ataOut"><div class="empty">A ATA aparece aqui depois da gravação: participantes, assuntos tratados, deliberações, plano de ação com responsáveis e prazos, e a transcrição com o nome de quem falou cada trecho.</div></div>
+    <div class="row" id="ataActions" hidden>
+      <button class="primary" id="pdfBtn">Baixar PDF</button>
+      <button id="copyBtn">Copiar texto (WhatsApp)</button>
+      <label class="row" style="font-size:13.5px;gap:6px;cursor:pointer"><input type="checkbox" id="incT" checked style="width:auto">Incluir transcrição no PDF</label>
+    </div>
+  </section>
+
+  <p class="foot">Ulrik Clean Eireli · CNPJ 14.399.944/0001-98 · Supervisão Operacional</p>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const KEY = "ulrik-ata-draft-v1";
+const POSTOS = [];
+const COLORS = ["#e3262f","#3b8fd9","#3fb27f","#e0a63a","#a46be0","#e06bb0","#4cc3c3","#b0b33a","#d9773b","#7f8ad9"];
+const NI = "Não identificado";
+
+let S = {
+  meta:{pauta:"",data:"",inicio:"",local:""},
+  people:[{nome:"",cargo:""}],
+  transcript:"", ata:null
+};
+try { const d = JSON.parse(localStorage.getItem(KEY)||"null"); if (d) S = Object.assign(S,d); } catch(e){}
+const now = new Date();
+if (!S.meta.data) S.meta.data = now.toISOString().slice(0,10);
+if (!S.meta.inicio) S.meta.inicio = now.toTimeString().slice(0,5);
+let saveT; function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){} },300); }
+
+/* ---------- etapa 1 ---------- */
+$("postos").innerHTML = POSTOS.map(p=>`<option value="${p}">`).join("");
+["pauta","data","inicio","local"].forEach(k=>{ const el=$("m_"+k); el.value=S.meta[k]||""; el.oninput=()=>{S.meta[k]=el.value;save();}; });
+function colorOf(nome){ const i=S.people.findIndex(p=>p.nome===nome); return i<0?"var(--muted)":COLORS[i%COLORS.length]; }
+function renderPeople(){
+  const box=$("people"); box.innerHTML="";
+  S.people.forEach((p,i)=>{
+    const r=document.createElement("div"); r.className="person";
+    r.innerHTML=`<span class="dot" style="background:${COLORS[i%COLORS.length]}"></span>
+      <input id="pn${i}" placeholder="Nome" aria-label="Nome">
+      <input id="pc${i}" class="cargo" placeholder="Cargo / área" aria-label="Cargo">
+      <button class="x" aria-label="Remover">✕</button>`;
+    const n=r.querySelector("#pn"+i), c=r.querySelector("#pc"+i);
+    n.value=p.nome; c.value=p.cargo;
+    n.oninput=()=>{p.nome=n.value;save();}; c.oninput=()=>{p.cargo=c.value;save();};
+    n.onchange=()=>{ if(S.ata) renderAta(); };
+    r.querySelector("button").onclick=()=>{S.people.splice(i,1);save();renderPeople(); if(S.ata) renderAta();};
+    box.appendChild(r);
+  });
+}
+$("addP").onclick=()=>{S.people.push({nome:"",cargo:""});save();renderPeople();$("pn"+(S.people.length-1)).focus();};
+renderPeople();
+
+/* ---------- etapa 2 ---------- */
+const T=$("transcript"); T.value=S.transcript;
+T.oninput=()=>{S.transcript=T.value;save();};
+$("clearT").onclick=()=>{ if(!T.value) return; if($("clearT").dataset.c){T.value="";S.transcript="";save();$("clearT").textContent="Limpar transcrição";delete $("clearT").dataset.c;} else {$("clearT").textContent="Confirmar: apagar tudo?";$("clearT").dataset.c=1;setTimeout(()=>{$("clearT").textContent="Limpar transcrição";delete $("clearT").dataset.c;},3500);} };
+const fmt = s => { s=Math.floor(s); return [s/3600,(s%3600)/60,s%60].map(v=>String(Math.floor(v)).padStart(2,"0")).join(":"); };
+function msg(el,text,kind){ $(el).innerHTML = text?`<div class="notice ${kind||""}"></div>`:""; if(text) $(el).firstChild.textContent=text; }
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const inArtifact = !!window.claude;
+let recording=false, rec=null, acc=0, segStart=0, tick=null, mediaRec=null, chunks=[], stream=null, actx=null, raf=null, wake=null;
+const elapsed = () => acc + (recording ? (performance.now()-segStart)/1000 : 0);
+
+if (!inArtifact) {
+  $("mode").textContent = "Gravador";
+  $("recArea").hidden=false; $("exportBtn").hidden=false;
+  if (!SR) msg("recMsg","Este navegador não transcreve voz. Use o Google Chrome (notebook ou Android) ou o Safari (iPhone).","err");
+} else {
+  $("mode").textContent = "Gerador de ATA";
+  $("importArea").hidden=false;
+}
+
+function addLine(text){
+  if(!text) return;
+  const line=`[${fmt(elapsed())}] ${text.charAt(0).toUpperCase()+text.slice(1)}`;
+  T.value = (T.value && !T.value.endsWith("\n") ? T.value+"\n" : T.value) + line + "\n";
+  T.scrollTop=T.scrollHeight; S.transcript=T.value; save();
+}
+function startSR(){
+  rec=new SR(); rec.lang="pt-BR"; rec.continuous=true; rec.interimResults=true;
+  rec.onresult=e=>{ let interim=""; for(let i=e.resultIndex;i<e.results.length;i++){ const r=e.results[i]; if(r.isFinal) addLine(r[0].transcript.trim()); else interim+=r[0].transcript; } $("interim").textContent=interim; };
+  rec.onerror=e=>{ if(e.error==="not-allowed"||e.error==="service-not-allowed"){ msg("recMsg","O microfone foi bloqueado. Clique no ícone de cadeado na barra de endereço do Chrome, permita o microfone e tente de novo.","err"); stopRec(); } else if(e.error==="audio-capture" && stream){ releaseAudio(); msg("recMsg","Este aparelho não deixa gravar o áudio e transcrever ao mesmo tempo. A transcrição continua; o arquivo de áudio não será gerado.",""); } else if(e.error==="network"){ msg("recMsg","A transcrição precisa de internet. Verifique a conexão; a gravação do áudio continua.","err"); } };
+  rec.onend=()=>{ if(recording){ try{rec.start();}catch(_){} } };
+  rec.start();
+}
+async function startRec(){
+  if(!SR) return;
+  msg("recMsg","");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+    mediaRec = new MediaRecorder(stream); mediaRec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    mediaRec.onstop=()=>{ const b=new Blob(chunks,{type:mediaRec.mimeType||"audio/webm"}); $("audioLink").href=URL.createObjectURL(b); $("audioLink").download=`audio-reuniao-${S.meta.data||"sem-data"}.webm`; $("audioRow").hidden=false; };
+    mediaRec.start(1000);
+    actx=new AudioContext(); const an=actx.createAnalyser(); an.fftSize=512; actx.createMediaStreamSource(stream).connect(an);
+    const buf=new Uint8Array(an.fftSize);
+    const loop=()=>{ an.getByteTimeDomainData(buf); let m=0; for(const v of buf) m=Math.max(m,Math.abs(v-128)); $("lvl").style.width=Math.min(100,m/0.9)+"%"; raf=requestAnimationFrame(loop); }; loop();
+  } catch(e){ msg("recMsg","Não foi possível acessar o microfone. Permita o acesso no Chrome e tente de novo.","err"); return; }
+  recording=true; segStart=performance.now();
+  if(!T.value.trim()) { T.value=`--- Reunião iniciada às ${new Date().toTimeString().slice(0,5)} ---\n`; S.meta.inicio=new Date().toTimeString().slice(0,5); $("m_inicio").value=S.meta.inicio; }
+  startSR();
+  try { wake = await navigator.wakeLock?.request("screen"); } catch(_){}
+  $("recBtn").classList.add("on"); $("recBtn").setAttribute("aria-label","Encerrar gravação");
+  $("recState").textContent="● Gravando"; $("recState").classList.add("live");
+  tick=setInterval(()=>{$("clock").textContent=fmt(elapsed());},250);
+}
+function releaseAudio(){
+  try{ mediaRec && mediaRec.state!=="inactive" && mediaRec.stop(); }catch(_){}
+  stream && stream.getTracks().forEach(t=>t.stop()); stream=null;
+  try{actx&&actx.close();}catch(_){} actx=null; cancelAnimationFrame(raf); $("lvl").style.width="0";
+}
+function stopRec(){
+  if(recording){ acc=elapsed(); }
+  recording=false; try{rec&&rec.stop();}catch(_){}
+  releaseAudio();
+  try{wake&&wake.release();}catch(_){}
+  clearInterval(tick); $("interim").textContent="";
+  $("recBtn").classList.remove("on"); $("recBtn").setAttribute("aria-label","Continuar gravação");
+  $("recState").textContent=acc?"Gravação encerrada · toque para continuar":"Pronto para gravar"; $("recState").classList.remove("live");
+  S.meta.fim=new Date().toTimeString().slice(0,5); save();
+}
+$("recBtn").onclick=()=> recording?stopRec():startRec();
+
+/* exportar (local) / importar (artefato) */
+function bundle(){ return "ULRIK-ATA-v1\n"+JSON.stringify({meta:S.meta,people:S.people,transcript:T.value}); }
+$("exportBtn").onclick=async()=>{
+  const txt=bundle();
+  const fname=`reuniao-${S.meta.data||"sem-data"}.txt`;
+  try{ const f=new File([txt],fname,{type:"text/plain"});
+    if(navigator.canShare && /Android|iPhone|iPad/i.test(navigator.userAgent) && navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:"Reunião "+fmtDate(S.meta.data)}); msg("recMsg","Arquivo compartilhado. Abra o Gerador de ATA no Claude e importe esse arquivo.","ok"); return; } }catch(e){ if(e.name==="AbortError") return; }
+  let copied=false; try{ await navigator.clipboard.writeText(txt); copied=true; }catch(_){}
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));
+  a.download=`reuniao-${S.meta.data||"sem-data"}.txt`; a.click();
+  msg("recMsg",(copied?"Copiado e salvo como arquivo .txt. ":"Salvo como arquivo .txt. ")+"Agora abra o Gerador de ATA no Claude e importe esse arquivo (ou cole o texto).","ok");
+};
+function importText(txt){
+  txt=String(txt||"");
+  if(txt.startsWith("ULRIK-ATA-v1")){
+    try{ const d=JSON.parse(txt.slice(txt.indexOf("\n")+1)); S.meta=Object.assign(S.meta,d.meta||{}); if(d.people?.length) S.people=d.people; S.transcript=d.transcript||""; S.ata=null;
+      ["pauta","data","inicio","local"].forEach(k=>$("m_"+k).value=S.meta[k]||""); T.value=S.transcript; renderPeople(); renderAta(); save();
+      msg("recMsg","Reunião importada: dados, participantes e transcrição. Confira e clique em “Gerar ATA com IA”.","ok"); return true;
+    }catch(e){ msg("recMsg","O arquivo parece corrompido. Tente exportar de novo no Gravador local.","err"); return false; }
+  }
+  return false;
+}
+$("fileIn").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; const t=await f.text(); if(!importText(t)){ T.value=t; S.transcript=t; save(); msg("recMsg","Transcrição carregada. Confira os participantes antes de gerar a ATA.","ok"); } e.target.value=""; };
+T.addEventListener("paste",e=>{ const t=e.clipboardData?.getData("text")||""; if(t.startsWith("ULRIK-ATA-v1")){ e.preventDefault(); importText(t); } });
+$("sampleBtn").onclick=()=>{
+  S.meta.pauta="Alinhamento semanal da operação (EXEMPLO)"; S.meta.local="Sede Grupo Ulrik";
+  ["pauta","local"].forEach(k=>$("m_"+k).value=S.meta[k]);
+  T.value=`--- EXEMPLO DE TRANSCRIÇÃO ---
+[00:00:04] Bom dia pessoal aqui é o João da supervisão vamos começar o alinhamento da semana
+[00:00:11] Bom dia Marcos aqui gerente operacional
+[00:00:15] Carlos supervisor do diurno bom dia
+[00:00:21] Primeiro ponto Carlos como ficou a cobertura do Condomínio A depois da saída do controlador de acesso
+[00:00:30] Então essa semana a gente cobriu com diária mas eu preciso de alguém fixo até sexta
+[00:00:38] Pode abrir a vaga com o RH hoje mesmo e até a contratação mantém a diária
+[00:00:46] Certo Marcos eu falo com a Ana ainda hoje
+[00:00:53] Segundo ponto o uniforme da equipe do Condomínio B ainda não chegou
+[00:01:01] A equipe separou ontem eu levo na quinta na ronda
+[00:01:08] Fechado então Carlos leva na quinta e eu confirmo com o síndico
+[00:01:15] Mais alguma coisa não então encerramos obrigado a todos`;
+  S.transcript=T.value; save(); msg("recMsg","Exemplo carregado. Clique em “Gerar ATA com IA” para ver o resultado.","ok");
+};
+
+/* ---------- app instalável (PWA) ---------- */
+if(!inArtifact && location.protocol.startsWith("http")){
+  if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  let deferred=null;
+  window.addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); deferred=e; $("installBtn").hidden=false; });
+  $("installBtn").onclick=async()=>{ if(!deferred) return; deferred.prompt(); await deferred.userChoice.catch(()=>{}); deferred=null; $("installBtn").hidden=true; };
+  window.addEventListener("appinstalled",()=>{ $("installBtn").hidden=true; });
+  const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  if(/iPhone|iPad/i.test(navigator.userAgent) && !standalone) $("iosHint").hidden=false;
+}
+
+/* ---------- etapa 3: IA ---------- */
+let sample=null, downloads=null, ctl=null;
+if(inArtifact){
+  claude.use("sample").then(s=>{ sample=s; if(!s) unavailableAI(); });
+  claude.use("downloads").then(d=>{ downloads=d; });
+} else unavailableAI();
+function unavailableAI(){
+  $("genBtn").disabled=true;
+  msg("genMsg", inArtifact ? "A IA não está disponível nesta visualização. Abra o Gerador de ATA dentro do Claude." : "A ATA é gerada no Gerador de ATA (no Claude). Ao terminar a reunião, clique em “Exportar para o Gerador de ATA” acima.", "");
+}
+
+function buildPrompt(){
+  const ppl=S.people.filter(p=>p.nome.trim()).map(p=>`- ${p.nome.trim()}${p.cargo?" — "+p.cargo:""}`).join("\n")||"- (nenhum cadastrado)";
+  const lines=T.value.split("\n").map(l=>l.trim()).filter(Boolean);
+  return `Você é o secretário de reuniões operacionais do Grupo Ulrik, empresa de portaria, controle de acesso, limpeza, zeladoria e segurança em condomínios da Grande São Paulo/ABC. Abaixo está a transcrição AUTOMÁTICA de uma reunião presencial gravada por um único microfone. A transcrição NÃO separa as vozes: cada linha é um trecho de fala com o tempo da gravação, e linhas seguidas podem ser de pessoas diferentes.
+
+DADOS DA REUNIÃO
+Assunto/pauta: ${S.meta.pauta||"(não informado)"}
+Data: ${S.meta.data||"(não informada)"} · Início: ${S.meta.inicio||"?"} · Local: ${S.meta.local||"(não informado)"}
+
+PARTICIPANTES CADASTRADOS
+${ppl}
+
+POSTOS/CONDOMÍNIOS ATENDIDOS (para corrigir nomes mal reconhecidos): ${POSTOS.join(", ")}
+
+TAREFA
+1) Atribua cada trecho a um participante. Use as pistas: apresentações ("aqui é o..."), vocativos ("Eder, você..." indica que quem fala NÃO é o Eder e que o próximo trecho provavelmente é dele), cargo e área de cada um, quem pergunta e quem responde, quem conduz a pauta, continuidade de assunto. Se um trecho tiver claramente duas falas, divida em dois. Quando não houver pista confiável, use "${NI}". Nunca invente pessoas fora da lista.
+2) Corrija erros evidentes de reconhecimento de voz e pontuação, sem mudar o sentido.
+3) Redija a ATA em português formal. Não invente decisões, responsáveis nem prazos: use "A definir" quando não forem ditos. Linhas de marcação como "--- ... ---" não são falas.
+
+Responda SOMENTE com um JSON válido neste formato:
+{
+ "titulo": "título curto da reunião",
+ "resumo": "2 a 4 frases com o objetivo e o resultado da reunião",
+ "assuntos": [{"titulo":"...","discussao":"o que foi discutido, citando quem disse o quê","participantes":["Nome"]}],
+ "deliberacoes": ["decisão tomada"],
+ "acoes": [{"acao":"...","responsavel":"Nome","prazo":"dd/mm/aaaa ou descrição ou A definir"}],
+ "pendencias": ["assunto em aberto"],
+ "falas": [{"t":"00:00:05","f":"Nome ou ${NI}","x":"texto corrigido"}]
+}
+
+TRANSCRIÇÃO
+${lines.join("\n")}`;
+}
+
+$("genBtn").onclick=async()=>{
+  if(!sample) return;
+  if(!T.value.trim()){ msg("genMsg","Grave a reunião ou importe a transcrição antes de gerar a ATA.","err"); return; }
+  msg("genMsg",""); $("genBtn").disabled=true; $("stopBtn").hidden=false;
+  ctl=new AbortController(); const t0=Date.now(); let streamed=0;
+  const tm=setInterval(()=>{ $("thinking").textContent=`${streamed?"Escrevendo a ATA":"Analisando quem falou o quê"}… ${Math.round((Date.now()-t0)/1000)}s`; },500);
+  try{
+    const d=await sample.json(buildPrompt(),{modelTier:"complex",signal:ctl.signal,onText:({text})=>{streamed=text.length;}});
+    S.ata={titulo:d.titulo||S.meta.pauta||"Reunião operacional",resumo:d.resumo||"",assuntos:arr(d.assuntos),deliberacoes:arr(d.deliberacoes),acoes:arr(d.acoes),pendencias:arr(d.pendencias),falas:arr(d.falas)};
+    save(); renderAta();
+    const n=S.ata.falas.filter(f=>f.f===NI).length;
+    msg("genMsg", n?`ATA pronta. ${n} trecho(s) ficaram sem falante identificado: ajuste na tabela de transcrição abaixo.`:"ATA pronta. Revise os textos (clique para editar) e baixe o PDF.","ok");
+  }catch(e){
+    const m={not_granted:"Você não autorizou o uso da IA. Recarregue a página e permita para gerar a ATA.",rate_limited:"Muitas solicitações seguidas. Aguarde um minuto e tente de novo.",cancelled:""}[e.code];
+    msg("genMsg", m===undefined?"Não consegui gerar a ATA desta vez ("+(e.message||e.code||"erro")+"). Tente de novo; se a reunião for muito longa, divida a transcrição em partes.":m, "err");
+  }finally{ clearInterval(tm); $("thinking").textContent=""; $("genBtn").disabled=false; $("stopBtn").hidden=true; }
+};
+$("stopBtn").onclick=()=>ctl&&ctl.abort();
+const arr=v=>Array.isArray(v)?v:[];
+
+function getPath(p){ return p.split(".").reduce((o,k)=>o?.[k],S.ata); }
+function setPath(p,v){ const ks=p.split("."); const last=ks.pop(); const o=ks.reduce((o,k)=>o[k],S.ata); o[last]=v; save(); }
+function ed(tag,path,cls){ const el=document.createElement(tag); el.contentEditable="true"; el.spellcheck=true; if(cls) el.className=cls; el.textContent=getPath(path)??""; el.addEventListener("input",()=>setPath(path,el.innerText.trim())); return el; }
+function h(tag,txt,cls){ const el=document.createElement(tag); if(txt!=null) el.textContent=txt; if(cls) el.className=cls; return el; }
+function names(){ return [...S.people.map(p=>p.nome.trim()).filter(Boolean),NI]; }
+function fmtDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${d}/${m}/${y}`; }
+
+function renderAta(){
+  const out=$("ataOut"); out.innerHTML="";
+  if(!S.ata){ out.innerHTML=`<div class="empty">A ATA aparece aqui depois da gravação: participantes, assuntos tratados, deliberações, plano de ação com responsáveis e prazos, e a transcrição com o nome de quem falou cada trecho.</div>`; $("ataActions").hidden=true; return; }
+  const A=S.ata, box=h("div",null,"ata");
+  box.append(ed("div","titulo","title"));
+  box.append(h("div",`${fmtDate(S.meta.data)} · ${S.meta.inicio||""}${S.meta.fim?"–"+S.meta.fim:""} · ${S.meta.local||"Local não informado"}`,"who"));
+  const sec=t=>{ const s=h("div"); s.append(h("h3",t)); box.append(s); return s; };
+  let s=sec("Participantes"); const ul=h("ul"); S.people.filter(p=>p.nome.trim()).forEach(p=>ul.append(h("li",`${p.nome}${p.cargo?" — "+p.cargo:""}`))); s.append(ul);
+  s=sec("Resumo"); s.append(ed("p","resumo"));
+  if(A.assuntos.length){ s=sec("Assuntos tratados"); A.assuntos.forEach((a,i)=>{ const d=h("div",null,"subj"); const b=ed("b",`assuntos.${i}.titulo`); d.append(b,ed("div",`assuntos.${i}.discussao`)); if(a.participantes?.length) d.append(h("div","Falaram: "+a.participantes.join(", "),"who")); s.append(d); }); }
+  const list=(title,key)=>{ if(!A[key].length) return; const s=sec(title); const u=h("ul"); A[key].forEach((_,i)=>u.append(ed("li",`${key}.${i}`))); s.append(u); };
+  list("Deliberações","deliberacoes");
+  if(A.acoes.length){ s=sec("Plano de ação"); const w=h("div",null,"tbl"); const t=h("table"); t.innerHTML="<thead><tr><th>Ação</th><th>Responsável</th><th>Prazo</th></tr></thead>"; const tb=h("tbody");
+    A.acoes.forEach((a,i)=>{ const tr=h("tr"); ["acao","responsavel","prazo"].forEach(k=>{ const td=ed("td",`acoes.${i}.${k}`); tr.append(td); }); tb.append(tr); }); t.append(tb); w.append(t); s.append(w); }
+  list("Pendências","pendencias");
+  if(A.falas.length){
+    s=sec("Transcrição com falantes");
+    const ctr=h("div",null,"row"); ctr.style.marginBottom="8px";
+    const de=h("select"), para=h("select"); de.id="reDe"; para.id="rePara"; de.setAttribute("aria-label","Trocar falas de"); para.setAttribute("aria-label","Para");
+    const used=[...new Set(A.falas.map(f=>f.f))]; used.forEach(n=>de.append(new Option(n,n))); names().forEach(n=>para.append(new Option(n,n)));
+    de.style.width=para.style.width="auto";
+    const go=h("button","Trocar todas"); go.onclick=()=>{ A.falas.forEach(f=>{ if(f.f===de.value) f.f=para.value; }); save(); renderAta(); };
+    ctr.append(h("span","Trocar falas de","who"),de,h("span","para","who"),para,go); s.append(ctr);
+    const w=h("div",null,"tbl"); const t=h("table"); t.innerHTML="<thead><tr><th>Tempo</th><th>Falante</th><th>Fala</th></tr></thead>"; const tb=h("tbody");
+    A.falas.forEach((f,i)=>{ const tr=h("tr"); tr.append(h("td",f.t||"","t"));
+      const tdS=h("td",null,"s"); const sel=h("select"); sel.setAttribute("aria-label","Falante"); const opts=names(); if(f.f&&!opts.includes(f.f)) opts.unshift(f.f); opts.forEach(n=>sel.append(new Option(n,n))); sel.value=f.f||NI; sel.style.borderLeftColor=colorOf(sel.value);
+      sel.onchange=()=>{ f.f=sel.value; sel.style.borderLeftColor=colorOf(sel.value); save(); }; tdS.append(sel);
+      tr.append(tdS, ed("td",`falas.${i}.x`)); tb.append(tr); });
+    t.append(tb); w.append(t); s.append(w);
+  }
+  out.append(box); $("ataActions").hidden=false;
+}
+renderAta();
+
+/* ---------- texto e PDF ---------- */
+function ataText(){
+  const A=S.ata; const L=[];
+  L.push("*GRUPO ULRIK — ATA DE REUNIÃO OPERACIONAL*", `*${A.titulo}*`, `${fmtDate(S.meta.data)} · ${S.meta.inicio||""}${S.meta.fim?"–"+S.meta.fim:""} · ${S.meta.local||""}`, "");
+  L.push("*Participantes:* "+S.people.filter(p=>p.nome.trim()).map(p=>p.nome).join(", "), "", "*Resumo:* "+A.resumo, "");
+  if(A.assuntos.length){ L.push("*Assuntos tratados*"); A.assuntos.forEach((a,i)=>L.push(`${i+1}. ${a.titulo}: ${a.discussao}`)); L.push(""); }
+  if(A.deliberacoes.length){ L.push("*Deliberações*"); A.deliberacoes.forEach(d=>L.push("• "+d)); L.push(""); }
+  if(A.acoes.length){ L.push("*Plano de ação*"); A.acoes.forEach(a=>L.push(`• ${a.acao} — ${a.responsavel||"A definir"} — ${a.prazo||"A definir"}`)); L.push(""); }
+  if(A.pendencias.length){ L.push("*Pendências*"); A.pendencias.forEach(d=>L.push("• "+d)); L.push(""); }
+  L.push("Supervisão Operacional — Grupo Ulrik"); return L.join("\n");
+}
+$("copyBtn").onclick=async()=>{ const t=ataText(); try{ await navigator.clipboard.writeText(t); $("copyBtn").textContent="Copiado ✓"; setTimeout(()=>$("copyBtn").textContent="Copiar texto (WhatsApp)",2000);}catch(_){ msg("genMsg","Não foi possível copiar automaticamente. Selecione o texto da ATA e copie manualmente.","err"); } };
+
+function buildPdf(){
+  const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"}); const A=S.ata;
+  const M=18, W=210-2*M, RED=[200,20,29], DARK=[22,22,23], GREY=[105,100,98];
+  let y=0;
+  const ensure=hgt=>{ if(y+hgt>278){ doc.addPage(); y=20; } };
+  const txt=(t,size,style,color,x=M,w=W,lh=1.42)=>{ doc.setFont("helvetica",style||"normal"); doc.setFontSize(size); doc.setTextColor(...(color||DARK)); const ls=doc.splitTextToSize(String(t||""),w); const step=size*0.3528*lh; ls.forEach(l=>{ ensure(step); doc.text(l,x,y+size*0.3528); y+=step; }); };
+  const sec=t=>{ y+=4; ensure(14); doc.setFillColor(...RED); doc.rect(M,y,2.2,5.2,"F"); txt(t.toUpperCase(),10.5,"bold",RED,M+5); y+=1.5; };
+  doc.setFillColor(...RED); doc.rect(0,0,210,4,"F");
+  y=14; doc.setFont("helvetica","bold"); doc.setFontSize(18); doc.setTextColor(...DARK); doc.text("GRUPO ULRIK",M,y+5);
+  doc.setFontSize(10); doc.setTextColor(...RED); doc.text("ATA DE REUNIÃO OPERACIONAL",210-M,y+5,{align:"right"}); y+=11;
+  doc.setDrawColor(...DARK); doc.setLineWidth(.4); doc.line(M,y,210-M,y); y+=5;
+  txt(A.titulo,13,"bold");
+  y+=1; txt(`Data: ${fmtDate(S.meta.data)}     Horário: ${S.meta.inicio||"--:--"}${S.meta.fim?" às "+S.meta.fim:""}     Local: ${S.meta.local||"—"}`,9.5,"normal",GREY);
+  sec("Participantes"); S.people.filter(p=>p.nome.trim()).forEach(p=>txt(`•  ${p.nome}${p.cargo?" — "+p.cargo:""}`,10));
+  sec("Resumo"); txt(A.resumo,10);
+  if(A.assuntos.length){ sec("Assuntos tratados"); A.assuntos.forEach((a,i)=>{ y+=1; txt(`${i+1}. ${a.titulo}`,10.5,"bold"); txt(a.discussao,10); }); }
+  if(A.deliberacoes.length){ sec("Deliberações"); A.deliberacoes.forEach(d=>txt("•  "+d,10)); }
+  if(A.acoes.length){ sec("Plano de ação"); const cw=[W*.52,W*.27,W*.21];
+    const row=(cells,head)=>{ doc.setFont("helvetica",head?"bold":"normal"); doc.setFontSize(head?8.5:9.5); const ls=cells.map((c,i)=>doc.splitTextToSize(String(c||"A definir"),cw[i]-4)); const hgt=Math.max(...ls.map(l=>l.length))*(head?3.8:4.4)+3.4; ensure(hgt);
+      if(head){ doc.setFillColor(240,238,237); doc.rect(M,y,W,hgt,"F"); }
+      let x=M; ls.forEach((l,i)=>{ doc.setTextColor(...(head?GREY:DARK)); doc.text(l,x+2,y+4.6); x+=cw[i]; }); y+=hgt; doc.setDrawColor(220,216,214); doc.setLineWidth(.2); doc.line(M,y,M+W,y); };
+    row(["AÇÃO","RESPONSÁVEL","PRAZO"],true); A.acoes.forEach(a=>row([a.acao,a.responsavel,a.prazo])); }
+  if(A.pendencias.length){ sec("Pendências"); A.pendencias.forEach(d=>txt("•  "+d,10)); }
+  // assinaturas
+  const ppl=S.people.filter(p=>p.nome.trim()); sec("Assinaturas"); y+=6;
+  for(let i=0;i<ppl.length;i+=2){ ensure(22); y+=10; [0,1].forEach(j=>{ const p=ppl[i+j]; if(!p) return; const x=M+j*(W/2+4), w=W/2-4; doc.setDrawColor(...DARK); doc.setLineWidth(.3); doc.line(x,y,x+w,y); doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...DARK); doc.text(p.nome,x,y+4.5); doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.setTextColor(...GREY); doc.text(p.cargo||"",x,y+8.5); }); y+=10; }
+  if($("incT").checked && A.falas.length){ doc.addPage(); y=20; sec("Anexo — Transcrição com falantes");
+    A.falas.forEach(f=>{ doc.setFontSize(9); const lab=`[${f.t||""}] ${f.f||NI}: `; doc.setFont("helvetica","bold"); const lw=Math.min(doc.getTextWidth(lab),70); const ls=doc.splitTextToSize(f.x||"",W-lw); ensure(ls.length*4.1+1.5);
+      doc.setTextColor(...RED); doc.text(lab,M,y+3.2); doc.setFont("helvetica","normal"); doc.setTextColor(...DARK); ls.forEach((l,k)=>doc.text(l,M+lw,y+3.2+k*4.1)); y+=ls.length*4.1+1.5; }); }
+  const n=doc.getNumberOfPages(); for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY); doc.text("Ulrik Clean Eireli · CNPJ 14.399.944/0001-98 · Supervisão Operacional",M,289); doc.text(`Página ${i} de ${n}`,210-M,289,{align:"right"}); }
+  return doc;
+}
+$("pdfBtn").onclick=async()=>{
+  if(!window.jspdf){ msg("genMsg","O gerador de PDF não carregou (sem internet?). Recarregue a página.","err"); return; }
+  const doc=buildPdf(); const local=(S.meta.local||"reuniao").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\w]+/g,"-");
+  const name=`ATA_${local}_${fmtDate(S.meta.data).replace(/\//g,"-")||"sem-data"}.pdf`;
+  if(downloads){ try{ await downloads.save({filename:name,data:doc.output("arraybuffer")}); }catch(e){ if(e.code!=="declined") msg("genMsg","Não foi possível baixar o PDF nesta visualização.","err"); } }
+  else if(!inArtifact) doc.save(name);
+  else msg("genMsg","Download indisponível nesta visualização. Use “Copiar texto”.","err");
+};
+})();
+</script>
+
+</body></html>
